@@ -1,0 +1,28 @@
+# 生产环境依赖文件
+# Django 后端依赖
+Django==3.2.11
+PyMySQL==1.0.2
+djangorestframework==3.13.0
+django-cors-headers==3.13.0
+Pillow==9.1.1
+psutil==5.9.4
+
+# Flask 后端依赖
+Flask==2.3.2
+Flask-SQLAlchemy==3.0.3
+Flask-CORS==4.0.0
+PyJWT==2.8.0
+PyMySQL==1.0.2
+cryptography==41.0.3
+
+# 前端依赖 (Node.js packages)
+# 请在 server/lcoa/vue-auth 目录下运行 npm install
+# 主要依赖:
+# axios@^1.13.0
+# chart.js@^4.5.1
+# d3@^7.9.0
+# dhtmlx-gantt@^9.1.0
+# element-plus@^2.11.9
+# vue@^3.5.22
+# vue-router@^4.6.3
+# xlsx@^0.18.5
