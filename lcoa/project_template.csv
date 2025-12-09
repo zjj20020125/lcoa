@@ -1,0 +1,6 @@
+project_name,product_name,product_image,customer_name,order_status,milestone,responsible_department,planned_start_time,planned_end_time,actual_completion_time,responsible_person,exception_type,impact_cycle,response_measures
+智能管理系统开发项目,企业管理平台V1.0,https://example.com/images/project1.png,ABC科技有限公司,已签约,需求分析完成,研发部,2025-12-01,2026-05-30,,张三,需求变更,15,增加开发人员，调整项目计划
+电商平台优化项目,在线购物系统V2.5,https://example.com/images/project2.png,XYZ电子商务公司,实施中,系统测试阶段,产品部,2025-11-01,2026-02-28,,李四,,,
+数据分析平台建设项目,大数据分析工具,https://example.com/images/project3.png,DEF金融集团,已完成,项目验收,数据部,2025-06-15,2025-11-20,2025-11-18,王五,技术难题,10,引入外部专家协助解决
+移动应用开发项目,健康助手APP,https://example.com/images/project4.png,GHI健康科技,已签约,UI设计完成,移动开发部,2025-12-10,2026-04-30,,赵六,,,
+云服务部署项目,企业云平台,https://example.com/images/project5.png,JKL制造有限公司,实施中,服务器部署,运维部,2025-10-20,2026-01-15,,孙七,硬件延迟,7,寻找替代供应商

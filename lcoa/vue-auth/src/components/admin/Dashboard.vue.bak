@@ -1,0 +1,1777 @@
+<template>
+  <div class="dashboard">
+    <div v-if="componentError" class="error-container">
+      <h2>组件加载错误</h2>
+      <p>{{ componentError }}</p>
+      <button @click="reloadComponent" class="retry-btn">重新加载</button>
+    </div>
+    <div v-else>
+      <h1>数据看板</h1>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-title">LCOA数据总量</div>
+          <div class="stat-value" v-if="!loading.lcoa">{{ formatNumber(lcoaTotal) }}</div>
+          <div class="stat-value" v-else>加载中...</div>
+          <div class="stat-change" :class="{ positive: lcoaTotal > 0 }">
+            {{ lcoaTotal > 0 ? '已加载' : '无数据' }}
+          </div>
+          <div v-if="error.lcoa" class="stat-error">错误: {{ error.lcoa }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">LCOA未处理流程总量</div>
+          <div class="stat-value" v-if="!loading.sysDeal">{{ formatNumber(sysDealTotal) }}</div>
+          <div class="stat-value" v-else>加载中...</div>
+          <div class="stat-change" :class="{ positive: sysDealTotal > 0 }">
+            {{ sysDealTotal > 0 ? '已加载' : '无数据' }}
+          </div>
+          <div v-if="error.sysDeal" class="stat-error">错误: {{ error.sysDeal }}</div>
+        </div>
+
+      </div>
+
+      <!-- 数据概览 -->
+      <div class="charts-container">
+        <div class="chart-card">
+          <h3>访问趋势</h3>
+          <div class="chart-container">
+            <canvas ref="barChartCanvas" v-if="barChartData.length > 0"></canvas>
+            <div v-else class="chart-placeholder">{{ chartLoading ? '数据加载中...' : '暂无数据' }}</div>
+          </div>
+        </div>
+
+        
+        <!-- 新增的部门人员分布扇形图 -->
+        <div class="chart-card">
+          <h3>部门人员分布</h3>
+          <div class="chart-container">
+            <canvas ref="clubPieChartCanvas" v-if="clubPieChartData.length > 0"></canvas>
+            <div v-else class="chart-placeholder">{{ chartLoading ? '数据加载中...' : '暂无数据' }}</div>
+          </div>
+        </div>
+        <div class="chart-card">
+          <h3 class="xiangxi-title">{{ getXiangxiDateInfo || '详细信息' }}数据</h3>
+          <div class="scroll-container xiangxi-scroll-container">
+            <div class="scroll-header">
+              <div class="header-item">姓名</div>
+              <div class="header-item">部门</div>
+              <div class="header-item">流程状态</div>
+              <div class="header-item">数量</div>
+            </div>
+            <div class="scroll-content" ref="xiangxiScrollContent">
+              <div 
+                class="scroll-item-wrapper"
+                :class="{ animating: isXiangxiScrolling }"
+                :style="{ transform: `translateY(${xiangxiScrollOffset}px)` }"
+              >
+                <div 
+                  class="scroll-item" 
+                  v-for="(item, index) in xiangxiData" 
+                  :key="index"
+                  :class="{ even: index % 2 === 0 }"
+                >
+                  <div class="item-cell name-cell">{{ item.姓名 }}</div>
+                  <div class="item-cell department-cell">{{ item.部门 }}</div>
+                  <div class="item-cell status-cell">{{ item.流程状态 }}</div>
+                  <div class="item-cell count-cell">{{ item.数量 }}</div>
+                </div>
+              </div>
+            </div>
+            <div class="scroll-placeholder" v-if="xiangxiData.length === 0">
+              {{ xiangxiLoading ? '数据加载中...' : (xiangxiError ? '数据加载失败: ' + xiangxiError : '暂无数据') }}
+            </div>
+          </div>
+          <div class="data-info xiangxi-data-info">
+            共 {{ xiangxiData.length }} 条记录
+          </div>
+        </div>
+      </div>
+
+      <!-- LCOA数据展示 -->
+      <div class="lcoa-data-section">
+        <h2 class="section-title">📊 LCOA数据详情</h2>
+        
+        <!-- 操作栏 -->
+        <div class="data-actions">
+          <div class="action-buttons">
+            <button class="refresh-btn" @click="refreshLcoaData" :disabled="lcoaLoading">
+              {{ lcoaLoading ? '加载中...' : '刷新数据' }}
+            </button>
+            <div class="search-box">
+              <input 
+                type="text" 
+                v-model="lcoaSearchKeyword" 
+                placeholder="搜索数据..." 
+                class="search-input"
+                @keyup.enter="performLcoaSearch"
+              >
+              <button class="search-btn" @click="performLcoaSearch">
+                🔍 搜索
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 错误提示 -->
+        <div v-if="lcoaError" class="error-message">
+          错误: {{ lcoaError }}
+        </div>
+        
+        <!-- 数据加载状态 -->
+        <div v-if="lcoaLoading" class="loading-state">
+          <div class="spinner"></div>
+          <p>正在加载数据...</p>
+        </div>
+        
+        <!-- 数据表格 -->
+        <div class="data-table-container" v-else-if="!lcoaError && lcoaFilteredData && lcoaFilteredData.length > 0">
+          <div class="table-wrapper">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th class="id-column">ID</th>
+                  <th 
+                    v-for="(header, index) in lcoaTableHeaders" 
+                    :key="index"
+                    @click="sortLcoaTable(lcoaTableFields[index])"
+                    class="sortable-header"
+                  >
+                    {{ header }}
+                    <span 
+                      v-if="lcoaSortField === lcoaTableFields[index]" 
+                      class="sort-indicator"
+                    >
+                      {{ lcoaSortOrder === 'asc' ? '↑' : '↓' }}
+                    </span>
+                  </th>
+                  <th 
+                    @click="sortLcoaTable('start_time')"
+                    class="sortable-header time-column"
+                  >
+                    开始时间
+                    <span 
+                      v-if="lcoaSortField === 'start_time'" 
+                      class="sort-indicator"
+                    >
+                      {{ lcoaSortOrder === 'asc' ? '↑' : '↓' }}
+                    </span>
+                  </th>
+                  <th 
+                    @click="sortLcoaTable('final_time')"
+                    class="sortable-header time-column"
+                  >
+                    结束时间
+                    <span 
+                      v-if="lcoaSortField === 'final_time'" 
+                      class="sort-indicator"
+                    >
+                      {{ lcoaSortOrder === 'asc' ? '↑' : '↓' }}
+                    </span>
+                  </th>
+                  <th class="action-column">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in lcoaPaginatedData" :key="item.id">
+                  <td>{{ item.id }}</td>
+                  <td 
+                    v-for="(field, index) in lcoaTableFields" 
+                    :key="index"
+                    :class="{ 'truncated': shouldTruncate(item[field]) }"
+                    :title="item[field]"
+                  >
+                    {{ truncateText(item[field]) }}
+                  </td>
+                  <td>{{ formatDateTime(item.start_time) }}</td>
+                  <td>{{ formatDateTime(item.final_time) }}</td>
+                  <td>
+                    <button class="detail-btn" @click="showLcoaDetail(item)">
+                      详情
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          
+          <!-- 分页控件 -->
+          <div class="pagination-controls">
+            <div class="pagination-info">
+              显示第 {{ lcoaDisplayedFrom }} 到 {{ lcoaDisplayedTo }} 条，共 {{ lcoaFilteredData.length }} 条数据
+            </div>
+            <div class="pagination-buttons">
+              <button 
+                @click="lcoaCurrentPage = 1" 
+                :disabled="lcoaCurrentPage === 1"
+                class="page-btn"
+              >
+                首页
+              </button>
+              <button 
+                @click="lcoaCurrentPage--" 
+                :disabled="lcoaCurrentPage === 1"
+                class="page-btn"
+              >
+                上一页
+              </button>
+              <span class="page-info">
+                第 {{ lcoaCurrentPage }} 页，共 {{ lcoaTotalPages }} 页
+              </span>
+              <button 
+                @click="lcoaCurrentPage++" 
+                :disabled="lcoaCurrentPage === lcoaTotalPages"
+                class="page-btn"
+              >
+                下一页
+              </button>
+              <button 
+                @click="lcoaCurrentPage = lcoaTotalPages" 
+                :disabled="lcoaCurrentPage === lcoaTotalPages"
+                class="page-btn"
+              >
+                末页
+              </button>
+            </div>
+            <!-- 页面大小选择 -->
+            <div class="page-size-selector">
+              <label>每页显示:</label>
+              <select v-model="lcoaPageSize" @change="handleLcoaPageSizeChange">
+                <option value="10">10</option>
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 无数据状态 -->
+        <div v-else-if="!lcoaError && !lcoaLoading && (!lcoaFilteredData || lcoaFilteredData.length === 0)" class="no-data">
+          <p>暂无数据</p>
+        </div>
+      </div>
+      
+      <!-- 详情弹窗 -->
+      <div v-if="showLcoaModal" class="modal-overlay" @click="closeLcoaModal">
+        <div class="modal-content" @click.stop>
+          <div class="modal-header">
+            <h3>详细信息</h3>
+            <button class="close-btn" @click="closeLcoaModal">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="detail-item" v-for="(header, index) in lcoaTableHeaders" :key="index">
+              <label>{{ header }}:</label>
+              <span>{{ currentLcoaDetail[lcoaTableFields[index]] || '-' }}</span>
+            </div>
+            <div class="detail-item">
+              <label>开始时间:</label>
+              <span>{{ formatDateTime(currentLcoaDetail.start_time) || '-' }}</span>
+            </div>
+            <div class="detail-item">
+              <label>结束时间:</label>
+              <span>{{ formatDateTime(currentLcoaDetail.final_time) || '-' }}</span>
+            </div>
+            <div class="detail-item">
+              <label>导入时间:</label>
+              <span>{{ formatDateTime(currentLcoaDetail.import_date) || '-' }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import { onMounted, onUnmounted, ref, watch, nextTick, computed } from 'vue'
+import { dataAPI as lcoaAPI } from '../../services/api'
+import Chart from 'chart.js/auto'
+import LcoaDataTable from './LcoaDataTable.vue'
+
+export default {
+  name: 'Dashboard',
+  components: {
+    LcoaDataTable
+  },
+  setup() {
+    // 响应式数据
+    const componentError = ref(null)
+    const lcoaTotal = ref(0)
+    const lcoaData = ref([])
+    const lcoaTableData = ref([])
+    const lcoaLoading = ref(false)
+    const lcoaError = ref(null)
+    const lcoaSearchKeyword = ref('')
+    const lcoaCurrentPage = ref(1)
+    const lcoaPageSize = ref(10)
+    const lcoaSortField = ref('')
+    const lcoaSortOrder = ref('asc')
+    
+    // sys_deal数据相关
+    const sysDealTotal = ref(0)
+    const clubData = ref([])
+    const chartLoading = ref(false)
+    const pieChartCanvas = ref(null)
+    let pieChart = null
+    
+    // 图表数据
+    const barChartCanvas = ref(null)
+    let barChart = null
+    const barChartData = ref([])
+    
+    // 新增部门人员分布图相关引用
+    const clubPieChartCanvas = ref(null)
+    let clubPieChart = null
+    const clubPieChartData = ref([])
+    
+    // xiangxi数据相关
+    const xiangxiData = ref([])
+    const xiangxiLoading = ref(false)
+    const xiangxiError = ref(null)
+    const xiangxiScrollContent = ref(null)
+    const xiangxiScrollOffset = ref(0)
+    const isXiangxiScrolling = ref(false)
+    const xiangxiItemHeight = 35
+    let xiangxiScrollInterval = null
+    
+    // 加载状态和错误信息
+    const loading = ref({
+      lcoa: false,
+      sysDeal: false,
+      club: false
+    })
+    
+    const error = ref({
+      lcoa: null,
+      sysDeal: null,
+      club: null
+    })
+    
+    // 模态框相关
+    const showLcoaModal = ref(false)
+    const currentLcoaDetail = ref({})
+    
+    // 表格相关
+    const lcoaTableHeaders = ref([
+      '流程ID','流程节点ID', '流程标题', '流程类型', '所属部门',
+      '所属分部', '流程名称', '节点操作者', '节点操作类型'
+    ])
+    
+    const lcoaTableFields = ref([
+      'process_id','processNode', 'Title', 'processType', 'Department',
+      'Club', 'Process_Name', 'user_Name', 'Status'
+    ])
+    
+    // 计算属性
+    const getXiangxiDateInfo = computed(() => {
+      if (xiangxiData.value.length > 0) {
+        return xiangxiData.value[0].import_date || ''
+      }
+      return ''
+    })
+    
+    const lcoaFilteredData = computed(() => {
+      let result = lcoaTableData.value || []
+      
+      // 应用搜索过滤
+      if (lcoaSearchKeyword.value) {
+        const keyword = lcoaSearchKeyword.value.toLowerCase()
+        result = result.filter(item => {
+          // 在所有列中搜索关键词
+          for (const field of lcoaTableFields.value) {
+            const fieldValue = item[field]
+            if (fieldValue && fieldValue.toLowerCase().includes(keyword)) {
+              return true
+            }
+          }
+          // 也在时间字段中搜索
+          const timeFields = ['start_time', 'final_time', 'import_date']
+          for (const field of timeFields) {
+            const fieldValue = item[field]
+            if (fieldValue && fieldValue.toLowerCase().includes(keyword)) {
+              return true
+            }
+          }
+          return false
+        })
+      }
+      
+      // 应用排序
+      if (lcoaSortField.value) {
+        result = [...result].sort((a, b) => {
+          const aVal = a[lcoaSortField.value] || ''
+          const bVal = b[lcoaSortField.value] || ''
+          
+          let comparison = 0
+          if (typeof aVal === 'string' && typeof bVal === 'string') {
+            comparison = aVal.localeCompare(bVal)
+          } else {
+            comparison = aVal > bVal ? 1 : aVal < bVal ? -1 : 0
+          }
+          
+          return lcoaSortOrder.value === 'asc' ? comparison : -comparison
+        })
+      }
+      
+      return result
+    })
+    
+    const lcoaPaginatedData = computed(() => {
+      const start = (lcoaCurrentPage.value - 1) * lcoaPageSize.value
+      const end = start + lcoaPageSize.value
+      return (lcoaFilteredData.value || []).slice(start, end)
+    })
+    
+    const lcoaDisplayedFrom = computed(() => {
+      return (lcoaFilteredData.value || []).length > 0 ? (lcoaCurrentPage.value - 1) * lcoaPageSize.value + 1 : 0
+    })
+    
+    const lcoaDisplayedTo = computed(() => {
+      const end = lcoaCurrentPage.value * lcoaPageSize.value
+      return end > (lcoaFilteredData.value || []).length ? (lcoaFilteredData.value || []).length : end
+    })
+    
+    const lcoaTotalPages = computed(() => {
+      return Math.ceil((lcoaFilteredData.value || []).length / lcoaPageSize.value)
+    })
+    
+    // 工具函数
+    const formatDateTime = (dateString) => {
+      if (!dateString) return '-'
+      return dateString
+    }
+    
+    const formatNumber = (num) => {
+      if (num === null || num === undefined) return '-'
+      return num.toLocaleString()
+    }
+    
+    const truncateText = (text) => {
+      if (!text) return '-'
+      return text.length > 20 ? text.substring(0, 20) + '...' : text
+    }
+    
+    const shouldTruncate = (text) => {
+      return text && text.length > 20
+    }
+    
+    // 处理函数
+    const handleLcoaPageSizeChange = () => {
+      lcoaCurrentPage.value = 1
+    }
+    
+    const refreshLcoaData = () => {
+      fetchLcoaTableData()
+    }
+    
+    const performLcoaSearch = () => {
+      lcoaCurrentPage.value = 1
+    }
+    
+    const sortLcoaTable = (field) => {
+      if (lcoaSortField.value === field) {
+        lcoaSortOrder.value = lcoaSortOrder.value === 'asc' ? 'desc' : 'asc'
+      } else {
+        lcoaSortField.value = field
+        lcoaSortOrder.value = 'asc'
+      }
+    }
+    
+    const showLcoaDetail = (item) => {
+      currentLcoaDetail.value = { ...item }
+      showLcoaModal.value = true
+    }
+    
+    const closeLcoaModal = () => {
+      showLcoaModal.value = false
+    }
+    
+    // 数据获取函数
+    const fetchLcoaCount = async () => {
+      loading.value.lcoa = true
+      error.value.lcoa = null
+      try {
+        const res = await lcoaAPI.getLcoaCount()
+        if (res.code === 200) {
+          lcoaTotal.value = res.data.total
+        } else {
+          throw new Error(res.message || '获取数据失败')
+        }
+      } catch (err) {
+        error.value.lcoa = err.response?.data?.message || err.message || '获取数据失败'
+      } finally {
+        loading.value.lcoa = false
+      }
+    }
+    
+    const fetchSysDealCount = async () => {
+      loading.value.sysDeal = true
+      error.value.sysDeal = null
+      try {
+        const res = await lcoaAPI.getSysDealCount()
+        if (res.code === 200) {
+          sysDealTotal.value = res.data.total
+        } else {
+          throw new Error(res.message || '获取数据失败')
+        }
+      } catch (err) {
+        error.value.sysDeal = err.response?.data?.message || err.message || '获取数据失败'
+      } finally {
+        loading.value.sysDeal = false
+      }
+    }
+    
+    const fetchLcoaTableData = async () => {
+      lcoaLoading.value = true
+      lcoaError.value = null
+      try {
+        const res = await lcoaAPI.getLcoaData()
+        if (res.code === 200) {
+          lcoaTableData.value = Array.isArray(res.data) ? res.data : []
+        } else {
+          throw new Error(res.message || '获取数据失败')
+        }
+      } catch (err) {
+        lcoaError.value = err.response?.data?.message || err.message || '获取数据失败'
+        lcoaTableData.value = []
+      } finally {
+        lcoaLoading.value = false
+      }
+    }
+    
+    const fetchXiangxiLatestData = async () => {
+      xiangxiLoading.value = true
+      xiangxiError.value = null
+      try {
+        const res = await lcoaAPI.getSysXiangxiLatest()
+        if (res.code === 200) {
+          xiangxiData.value = Array.isArray(res.data) ? res.data : []
+          nextTick(() => {
+            startXiangxiScrolling()
+          })
+        } else {
+          throw new Error(res.message || '获取数据失败')
+        }
+      } catch (err) {
+        xiangxiError.value = err.response?.data?.message || err.message || '获取数据失败'
+        xiangxiData.value = []
+      } finally {
+        xiangxiLoading.value = false
+      }
+    }
+    
+    const fetchClubData = async () => {
+      chartLoading.value = true
+      error.value.club = null
+      try {
+        const res = await lcoaAPI.getSysClubLatest()
+        if (res.code === 200) {
+          clubData.value = res.data
+          // 处理新图表数据
+          clubPieChartData.value = res.data
+          await nextTick()
+          drawPieChart()
+          drawClubPieChart() // 绘制新图表
+        } else {
+          throw new Error(res.message || '获取部门数据失败')
+        }
+      } catch (err) {
+        error.value.club = err.response?.data?.message || err.message || '获取部门数据失败'
+      } finally {
+        chartLoading.value = false
+      }
+    }
+    
+    // 图表相关函数
+    const generateBarChartData = () => {
+      const data = []
+      for (let i = 0; i < 5; i++) {
+        data.push({
+          label: `第${i+1}月`,
+          value: Math.floor(Math.random() * 1000) + 100
+        })
+      }
+      barChartData.value = data
+    }
+    
+    const drawBarChart = () => {
+      if (!barChartCanvas.value || barChartData.value.length === 0) return
+      
+      if (barChart) {
+        barChart.destroy()
+      }
+      
+      const ctx = barChartCanvas.value.getContext('2d')
+      const labels = barChartData.value.map(item => item.label)
+      const data = barChartData.value.map(item => item.value)
+      
+      barChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: '访问量',
+            data: data,
+            backgroundColor: [
+              '#36A2EB',
+              '#4BC0C0',
+              '#FF6384',
+              '#FF9F40',
+              '#9966FF'
+            ],
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true
+            }
+          },
+          plugins: {
+            legend: {
+              display: false
+            }
+          }
+        }
+      })
+    }
+    
+    const drawPieChart = () => {
+      if (!pieChartCanvas.value || clubData.value.length === 0) return
+      
+      if (pieChart) {
+        pieChart.destroy()
+      }
+      
+      const ctx = pieChartCanvas.value.getContext('2d')
+      const labels = clubData.value.map(item => item.department)
+      const data = clubData.value.map(item => item.count)
+      
+      const backgroundColors = [
+        '#FF6384',
+        '#36A2EB',
+        '#FFCE56',
+        '#4BC0C0',
+        '#9966FF',
+        '#FF9F40',
+        '#FF6384',
+        '#C9CBCF'
+      ]
+      
+      pieChart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: data,
+            backgroundColor: backgroundColors.slice(0, data.length),
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const label = context.label || ''
+                  const value = context.parsed
+                  const total = context.dataset.data.reduce((a, b) => a + b, 0)
+                  const percentage = ((value / total) * 100).toFixed(1)
+                  return `${label}: ${value} (${percentage}%)`
+                }
+              }
+            }
+          }
+        }
+      })
+    }
+    
+    // 新增绘制部门人员分布扇形图函数
+    const drawClubPieChart = () => {
+      if (!clubPieChartCanvas.value || clubPieChartData.value.length === 0) return
+      
+      if (clubPieChart) {
+        clubPieChart.destroy()
+      }
+      
+      const ctx = clubPieChartCanvas.value.getContext('2d')
+      const labels = clubPieChartData.value.map(item => item.department)
+      const data = clubPieChartData.value.map(item => parseInt(item.personnel_count) || 0)
+      
+      // 八种不同颜色
+      const backgroundColors = [
+        '#FF6384',
+        '#36A2EB',
+        '#FFCE56',
+        '#4BC0C0',
+        '#9966FF',
+        '#FF9F40',
+        '#FF6B8B',
+        '#2ED08A'
+      ]
+      
+      clubPieChart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: data,
+            backgroundColor: backgroundColors,
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const label = context.label || ''
+                  const value = context.parsed
+                  const total = context.dataset.data.reduce((a, b) => a + b, 0)
+                  const percentage = ((value / total) * 100).toFixed(1)
+                  return `${label}: ${value} (${percentage}%)`
+                }
+              }
+            }
+          }
+        }
+      })
+    }
+    
+    // 滚动相关函数
+    const startXiangxiScrolling = () => {
+      stopXiangxiScrolling()
+      
+      if (xiangxiData.value.length > 5) {
+        xiangxiScrollInterval = setInterval(() => {
+          isXiangxiScrolling.value = true
+          const totalItems = xiangxiData.value.length
+          const itemHeight = xiangxiItemHeight
+          const maxOffset = -(totalItems * itemHeight)
+          
+          let currentOffset = xiangxiScrollOffset.value
+          const targetOffset = currentOffset - itemHeight
+          
+          if (Math.abs(targetOffset) >= Math.abs(maxOffset)) {
+            xiangxiScrollOffset.value = 0
+          } else {
+            xiangxiScrollOffset.value = targetOffset
+          }
+        }, 3000)
+      }
+    }
+    
+    const stopXiangxiScrolling = () => {
+      if (xiangxiScrollInterval) {
+        clearInterval(xiangxiScrollInterval)
+        xiangxiScrollInterval = null
+      }
+      isXiangxiScrolling.value = false
+      xiangxiScrollOffset.value = 0
+    }
+    
+    // 初始化组件
+    const initComponent = async () => {
+      try {
+        fetchLcoaCount()
+        fetchSysDealCount()
+        fetchClubData()
+        generateBarChartData()
+        fetchXiangxiLatestData()
+        
+        nextTick(() => {
+          drawBarChart()
+          drawPieChart()
+        })
+      } catch (error) {
+        componentError.value = '组件初始化失败: ' + (error.message || '未知错误')
+      }
+    }
+    
+    const reloadComponent = () => {
+      componentError.value = null
+      initComponent()
+    }
+    
+    onMounted(() => {
+      initComponent()
+    })
+    
+    onUnmounted(() => {
+      stopXiangxiScrolling()
+    })
+    
+    return {
+      componentError,
+      lcoaTotal,
+      sysDealTotal,
+      clubData,
+      barChartData,
+      clubPieChartCanvas,
+      clubPieChartData,
+      loading,
+      error,
+      lcoaTableData,
+      lcoaLoading,
+      lcoaError,
+      lcoaSearchKeyword,
+      lcoaCurrentPage,
+      lcoaPageSize,
+      lcoaSortField,
+      lcoaSortOrder,
+      lcoaFilteredData,
+      lcoaPaginatedData,
+      lcoaTableHeaders,
+      lcoaTableFields,
+      getXiangxiDateInfo,
+      showLcoaModal,
+      currentLcoaDetail,
+      xiangxiData,
+      xiangxiLoading,
+      xiangxiError,
+      xiangxiScrollContent,
+      xiangxiScrollOffset,
+      isXiangxiScrolling,
+      xiangxiItemHeight,
+      refreshLcoaData,
+      performLcoaSearch,
+      sortLcoaTable,
+      closeLcoaModal,
+      formatDateTime,
+      formatNumber,
+      handleLcoaPageSizeChange,
+      startXiangxiScrolling,
+      stopXiangxiScrolling,
+      reloadComponent,
+      showLcoaDetail,
+      truncateText,
+      shouldTruncate
+    }
+  }
+}
+</script>
+
+<style scoped>
+.dashboard {
+  padding: 20px;
+  background-color: #f5f5f5;
+  min-height: 100vh;
+}
+
+.error-container {
+  background: white;
+  border-radius: 8px;
+  padding: 30px;
+  text-align: center;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.retry-btn {
+  background-color: #409eff;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.retry-btn:hover {
+  background-color: #337ecc;
+}
+
+h1 {
+  color: #333;
+  margin-bottom: 30px;
+  text-align: center;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.stat-card {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.stat-title {
+  font-size: 16px;
+  color: #666;
+  margin-bottom: 10px;
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: bold;
+  color: #333;
+  margin-bottom: 10px;
+}
+
+.stat-change {
+  font-size: 14px;
+  color: #999;
+}
+
+.stat-change.positive {
+  color: #67c23a;
+}
+
+.stat-error {
+  color: #f56c6c;
+  font-size: 14px;
+  margin-top: 10px;
+}
+
+.charts-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.chart-card {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.chart-card h3 {
+  margin-top: 0;
+  color: #333;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 10px;
+}
+
+.chart-container {
+  height: 300px;
+  position: relative;
+}
+
+.chart-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #999;
+}
+
+.scroll-container {
+  height: 200px;
+  overflow: hidden;
+  position: relative;
+}
+
+.scroll-header {
+  display: flex;
+  background: #f5f7fa;
+  font-weight: bold;
+  padding: 10px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.header-item {
+  flex: 1;
+  padding: 0 10px;
+}
+
+.scroll-content {
+  height: 165px;
+  overflow: hidden;
+}
+
+.scroll-item-wrapper {
+  transition: transform 0.5s ease;
+}
+
+.scroll-item {
+  display: flex;
+  height: 35px;
+  line-height: 35px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.scroll-item.even {
+  background-color: #fafafa;
+}
+
+.item-cell {
+  flex: 1;
+  padding: 0 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.data-info {
+  margin-top: 10px;
+  text-align: right;
+  color: #666;
+  font-size: 14px;
+}
+
+.lcoa-data-section {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.section-title {
+  margin-top: 0;
+  color: #333;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 10px;
+}
+
+.data-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.refresh-btn {
+  background-color: #409eff;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.refresh-btn:disabled {
+  background-color: #a0cfff;
+  cursor: not-allowed;
+}
+
+.search-box {
+  display: flex;
+  gap: 10px;
+}
+
+.search-input {
+  padding: 8px 12px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.search-btn {
+  background-color: #67c23a;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.error-message {
+  color: #f56c6c;
+  background-color: #fef0f0;
+  border: 1px solid #fbc4c4;
+  padding: 10px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+
+.loading-state {
+  text-align: center;
+  padding: 40px 0;
+}
+
+.spinner {
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #409eff;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 20px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.data-table-container {
+  overflow-x: auto;
+}
+
+.table-wrapper {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table th,
+.data-table td {
+  padding: 12px 10px;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+
+.data-table th {
+  background-color: #f5f7fa;
+  font-weight: bold;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.sortable-header {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+
+.sortable-header:hover {
+  background-color: #e1e6f0;
+}
+
+.sort-indicator {
+  margin-left: 5px;
+  font-size: 12px;
+}
+
+.id-column {
+  width: 60px;
+}
+
+.time-column {
+  width: 150px;
+}
+
+.action-column {
+  width: 80px;
+}
+
+.truncated {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.detail-btn {
+  background-color: #409eff;
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.pagination-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 15px;
+  margin-top: 20px;
+  padding: 15px 0;
+  border-top: 1px solid #eee;
+}
+
+.pagination-info {
+  color: #666;
+  font-size: 14px;
+}
+
+.pagination-buttons {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.page-btn {
+  background-color: #f4f4f5;
+  color: #606266;
+  border: 1px solid #dcdfe6;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.page-btn:disabled {
+  background-color: #f5f7fa;
+  color: #c0c4cc;
+  cursor: not-allowed;
+}
+
+.page-btn:not(:disabled):hover {
+  background-color: #409eff;
+  color: white;
+}
+
+.page-info {
+  color: #666;
+  font-size: 14px;
+  margin: 0 10px;
+}
+
+.page-size-selector {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #666;
+  font-size: 14px;
+}
+
+.page-size-selector select {
+  padding: 5px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+}
+
+.no-data {
+  text-align: center;
+  padding: 40px 0;
+  color: #999;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 1px solid #eee;
+}
+
+.modal-header h3 {
+  margin: 0;
+  color: #333;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #999;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-btn:hover {
+  color: #333;
+}
+
+.modal-body {
+  padding: 20px;
+}
+
+.detail-item {
+  display: flex;
+  margin-bottom: 15px;
+  align-items: flex-start;
+}
+
+.detail-item label {
+  font-weight: 600;
+  width: 100px;
+  color: #555;
+  flex-shrink: 0;
+}
+
+.detail-item span {
+  flex: 1;
+  color: #333;
+  word-break: break-word;
+}
+
+@media (max-width: 768px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .charts-container {
+    grid-template-columns: 1fr;
+  }
+  
+  .data-actions {
+    flex-direction: column;
+  }
+  
+  .search-box {
+    width: 100%;
+  }
+  
+  .action-buttons {
+    width: 100%;
+    justify-content: center;
+  }
+  
+  .pagination-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .pagination-buttons {
+    justify-content: center;
+  }
+  
+  .page-size-selector {
+    justify-content: center;
+  }
+}
+</style>
+<template>
+  <div class="dashboard">
+    <div v-if="componentError" class="error-container">
+      <h2>组件加载错误</h2>
+      <p>{{ componentError }}</p>
+      <button @click="reloadComponent" class="retry-btn">重新加载</button>
+    </div>
+    <div v-else>
+      <h1>数据看板</h1>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-title">LCOA数据总量</div>
+          <div class="stat-value" v-if="!loading.lcoa">{{ formatNumber(lcoaTotal) }}</div>
+          <div class="stat-value" v-else>加载中...</div>
+          <div class="stat-change" :class="{ positive: lcoaTotal > 0 }">
+            {{ lcoaTotal > 0 ? '已加载' : '无数据' }}
+          </div>
+          <div v-if="error.lcoa" class="stat-error">错误: {{ error.lcoa }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">LCOA未处理流程总量</div>
+          <div class="stat-value" v-if="!loading.sysDeal">{{ formatNumber(sysDealTotal) }}</div>
+          <div class="stat-value" v-else>加载中...</div>
+          <div class="stat-change" :class="{ positive: sysDealTotal > 0 }">
+            {{ sysDealTotal > 0 ? '已加载' : '无数据' }}
+          </div>
+          <div v-if="error.sysDeal" class="stat-error">错误: {{ error.sysDeal }}</div>
+        </div>
+      </div>
+
+      <!-- 数据概览 -->
+      <div class="charts-container">
+        <div class="chart-card">
+          <h3>访问趋势</h3>
+          <div class="chart-container">
+            <canvas ref="barChartCanvas" v-if="barChartData.length > 0"></canvas>
+            <div v-else class="chart-placeholder">{{ chartLoading ? '数据加载中...' : '暂无数据' }}</div>
+          </div>
+        </div>
+        
+        <!-- 新增的部门人员分布扇形图 -->
+        <div class="chart-card">
+          <h3>部门人员分布</h3>
+          <div class="chart-container">
+            <canvas ref="clubPieChartCanvas" v-if="clubPieChartData.length > 0"></canvas>
+            <div v-else class="chart-placeholder">{{ chartLoading ? '数据加载中...' : '暂无数据' }}</div>
+          </div>
+        </div>
+        <div class="chart-card">
+          <h3 class="xiangxi-title">{{ getXiangxiDateInfo || '详细信息' }}数据</h3>
+          <div class="scroll-container xiangxi-scroll-container">
+            <div class="scroll-header">
+              <div class="header-item">姓名</div>
+              <div class="header-item">部门</div>
+              <div class="header-item">流程状态</div>
+              <div class="header-item">数量</div>
+            </div>
+            <div class="scroll-content" ref="xiangxiScrollContent">
+              <div 
+                class="scroll-item-wrapper"
+                :class="{ animating: isXiangxiScrolling }"
+                :style="{ transform: `translateY(${xiangxiScrollOffset}px)` }"
+              >
+                <div 
+                  class="scroll-item" 
+                  v-for="(item, index) in xiangxiData" 
+                  :key="index"
+                  :class="{ even: index % 2 === 0 }"
+                >
+                  <div class="item-cell name-cell">{{ item.姓名 }}</div>
+                  <div class="item-cell department-cell">{{ item.部门 }}</div>
+                  <div class="item-cell status-cell">{{ item.流程状态 }}</div>
+                  <div class="item-cell count-cell">{{ item.数量 }}</div>
+                </div>
+              </div>
+            </div>
+            <div class="scroll-placeholder" v-if="xiangxiData.length === 0">
+              {{ xiangxiLoading ? '数据加载中...' : (xiangxiError ? '数据加载失败: ' + xiangxiError : '暂无数据') }}
+            </div>
+          </div>
+          <div class="data-info xiangxi-data-info">
+            共 {{ xiangxiData.length }} 条记录
+          </div>
+        </div>
+      </div>
+
+      <!-- LCOA数据展示 -->
+      <div class="lcoa-data-section">
+        <h2 class="section-title">📊 LCOA数据详情</h2>
+        
+        <!-- 操作栏 -->
+        <div class="data-actions">
+          <div class="action-buttons">
+            <button class="refresh-btn" @click="refreshLcoaData" :disabled="lcoaLoading">
+              {{ lcoaLoading ? '加载中...' : '刷新数据' }}
+            </button>
+            <div class="search-box">
+              <input 
+                type="text" 
+                v-model="lcoaSearchKeyword" 
+                placeholder="搜索数据..." 
+                class="search-input"
+                @keyup.enter="performLcoaSearch"
+              >
+              <button class="search-btn" @click="performLcoaSearch">
+                🔍 搜索
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 错误提示 -->
+        <div v-if="lcoaError" class="error-message">
+          错误: {{ lcoaError }}
+        </div>
+        
+        <!-- 数据加载状态 -->
+        <div v-if="lcoaLoading" class="loading-state">
+          <div class="spinner"></div>
+          <p>正在加载数据...</p>
+        </div>
+        
+        <!-- 数据表格 -->
+        <div class="data-table-container" v-else-if="!lcoaError && lcoaFilteredData && lcoaFilteredData.length > 0">
+          <div class="table-wrapper">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th class="id-column">ID</th>
+                  <th 
+                    v-for="(header, index) in lcoaTableHeaders" 
+                    :key="index"
+                    @click="sortLcoaTable(lcoaTableFields[index])"
+                    class="sortable-header"
+                  >
+                    {{ header }}
+                    <span 
+                      v-if="lcoaSortField === lcoaTableFields[index]" 
+                      class="sort-indicator"
+                    >
+                      {{ lcoaSortOrder === 'asc' ? '↑' : '↓' }}
+                    </span>
+                  </th>
+                  <th 
+                    @click="sortLcoaTable('start_time')"
+                    class="sortable-header time-column"
+                  >
+                    开始时间
+                    <span 
+                      v-if="lcoaSortField === 'start_time'" 
+                      class="sort-indicator"
+                    >
+                      {{ lcoaSortOrder === 'asc' ? '↑' : '↓' }}
+                    </span>
+                  </th>
+                  <th 
+                    @click="sortLcoaTable('final_time')"
+                    class="sortable-header time-column"
+                  >
+                    结束时间
+                    <span 
+                      v-if="lcoaSortField === 'final_time'" 
+                      class="sort-indicator"
+                    >
+                      {{ lcoaSortOrder === 'asc' ? '↑' : '↓' }}
+                    </span>
+                  </th>
+                  <th class="action-column">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in lcoaPaginatedData" :key="item.id">
+                  <td>{{ item.id }}</td>
+                  <td 
+                    v-for="(field, index) in lcoaTableFields" 
+                    :key="index"
+                    :class="{ 'truncated': shouldTruncate(item[field]) }"
+                    :title="item[field]"
+                  >
+                    {{ truncateText(item[field]) }}
+                  </td>
+                  <td>{{ formatDateTime(item.start_time) }}</td>
+                  <td>{{ formatDateTime(item.final_time) }}</td>
+                  <td>
+                    <button class="detail-btn" @click="showLcoaDetail(item)">
+                      详情
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          
+          <!-- 分页控件 -->
+          <div class="pagination-controls">
+            <div class="pagination-info">
+              显示第 {{ lcoaDisplayedFrom }} 到 {{ lcoaDisplayedTo }} 条，共 {{ lcoaFilteredData.length }} 条数据
+            </div>
+            <div class="pagination-buttons">
+              <button 
+                @click="lcoaCurrentPage = 1" 
+                :disabled="lcoaCurrentPage === 1"
+                class="page-btn"
+              >
+                首页
+              </button>
+              <button 
+                @click="lcoaCurrentPage--" 
+                :disabled="lcoaCurrentPage === 1"
+                class="page-btn"
+              >
+                上一页
+              </button>
+              <span class="page-info">
+                第 {{ lcoaCurrentPage }} 页，共 {{ lcoaTotalPages }} 页
+              </span>
+              <button 
+                @click="lcoaCurrentPage++" 
+                :disabled="lcoaCurrentPage === lcoaTotalPages"
+                class="page-btn"
+              >
+                下一页
+              </button>
+              <button 
+                @click="lcoaCurrentPage = lcoaTotalPages" 
+                :disabled="lcoaCurrentPage === lcoaTotalPages"
+                class="page-btn"
+              >
+                末页
+              </button>
+            </div>
+            <!-- 页面大小选择 -->
+            <div class="page-size-selector">
+              <label>每页显示:</label>
+              <select v-model="lcoaPageSize" @change="handleLcoaPageSizeChange">
+                <option value="10">10</option>
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 无数据状态 -->
+        <div v-else-if="!lcoaError && !lcoaLoading && (!lcoaFilteredData || lcoaFilteredData.length === 0)" class="no-data">
+          <p>暂无数据</p>
+        </div>
+      </div>
+      
+      <!-- 详情弹窗 -->
+      <div v-if="showLcoaModal" class="modal-overlay" @click="closeLcoaModal">
+        <div class="modal-content" @click.stop>
+          <div class="modal-header">
+            <h3>详细信息</h3>
+            <button class="close-btn" @click="closeLcoaModal">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="detail-item" v-for="(header, index) in lcoaTableHeaders" :key="index">
+              <label>{{ header }}:</label>
+              <span>{{ currentLcoaDetail[lcoaTableFields[index]] || '-' }}</span>
+            </div>
+            <div class="detail-item">
+              <label>开始时间:</label>
+              <span>{{ formatDateTime(currentLcoaDetail.start_time) || '-' }}</span>
+            </div>
+            <div class="detail-item">
+              <label>结束时间:</label>
+              <span>{{ formatDateTime(currentLcoaDetail.final_time) || '-' }}</span>
+            </div>
+            <div class="detail-item">
+              <label>导入时间:</label>
+              <span>{{ formatDateTime(currentLcoaDetail.import_date) || '-' }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import { onMounted, onUnmounted, ref, watch, nextTick, computed } from 'vue'
+import { dataAPI as lcoaAPI } from '../../services/api'
+import Chart from 'chart.js/auto'
+import LcoaDataTable from './LcoaDataTable.vue'
+
+export default {
+  name: 'Dashboard',
+  components: {
+    LcoaDataTable
+  },
+  setup() {
+    // 响应式数据
+    const componentError = ref(null)
+    const lcoaTotal = ref(0)
+    const lcoaData = ref([])
+    const lcoaTableData = ref([])
+    const lcoaLoading = ref(false)
+    const lcoaError = ref(null)
+    const lcoaSearchKeyword = ref('')
+    const lcoaCurrentPage = ref(1)
+    const lcoaPageSize = ref(10)
+    const lcoaSortField = ref('')
+    const lcoaSortOrder = ref('asc')
+    const lcoaMaxId = ref(0)
+    
+    // sys_deal数据相关
+    const sysDealTotal = ref(0)
+    const clubData = ref([])
+    const chartLoading = ref(false)
+    const pieChartCanvas = ref(null)
+    let pieChart = null
+    
+    // 图表数据
+    const barChartCanvas = ref(null)
+    let barChart = null
+    const barChartData = ref([])
+    
+    const userPieChartCanvas = ref(null)
+    let userPieChart = null
+    const userPieChartData = ref([])
+    
+    // 新增部门人员分布图相关引用
+    const clubPieChartCanvas = ref(null)
+    let clubPieChart = null
+    const clubPieChartData = ref([])
+    
+    // xiangxi数据相关
+    const xiangxiData = ref([])
+    const xiangxiLoading = ref(false)
+    const xiangxiError = ref(null)
+    const xiangxiScrollContent = ref(null)
+    const xiangxiScrollOffset = ref(0)
+    const isXiangxiScrolling = ref(false)
+    const xiangxiItemHeight = 35
+    let xiangxiScrollInterval = null
+    
+    // 加载状态和错误信息
+    const loading = ref({
+      lcoa: false,
+      sysDeal: false,
+      club: false
+    })
+    
+    const error = ref({
+      lcoa: null,
+      sysDeal: null,
+      club: null
+    })
+    
+    // 模态框相关
+    const showLcoaModal = ref(false)
+    const currentLcoaDetail = ref({})
+    
+    // 表格相关
+    const lcoaTableHeaders = ref([
+      '流程ID','流程节点ID', '流程标题', '流程类型', '所属部门',
+      '所属分部', '流程名称', '节点操作者', '节点操作类型'
+    ])
+    
+    const lcoaTableFields = ref([
+      'process_id','processNode', 'Title', 'processType', 'Department',
+      'Club', 'Process_Name', 'user_Name', 'Status'
+    ])
+    
+    // 计算属性
+    const getXiangxiDateInfo = computed(() => {
+      if (xiangxiData.value.length > 0) {
+        return xiangxiData.value[0].import_date || ''
+      }
+      return ''
+    })
+    
+    const lcoaFilteredData = computed(() => {
+      let result = lcoaTableData.value || []
+      
+      // 应用搜索过滤
+      if (lcoaSearchKeyword.value) {
+        const keyword = lcoaSearchKeyword.value.toLowerCase()
+        result = result.filter(item => {
+          // 在所有列中搜索关键词
+          for (const field of lcoaTableFields.value) {
+            const fieldValue = item[field]
+            if (fieldValue && fieldValue.toLowerCase().includes(keyword)) {
+              return true
+            }
+          }
+          // 也在时间字段中搜索
+          const timeFields = ['start_time', 'final_time', 'import_date']
+          for (const field of timeFields) {
+            const fieldValue = item[field]
+            if (fieldValue && fieldValue.toLowerCase().includes(keyword)) {
+              return true
+            }
+          }
+          return

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}登录 - Flask Auth{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">用户登录</h2>
+<form method="POST">
+    {{ form.hidden_tag() }}  <!-- CSRF 令牌 -->
+
+    <div class="mb-3">
+        {{ form.username.label(class="form-label") }}
+        {{ form.username(class="form-control") }}
+        {% for error in form.username.errors %}
+        <small class="text-danger">{{ error }}</small>
+        {% endfor %}
+    </div>
+
+    <div class="mb-3">
+        {{ form.password.label(class="form-label") }}
+        {{ form.password(class="form-control") }}
+        {% for error in form.password.errors %}
+        <small class="text-danger">{{ error }}</small>
+        {% endfor %}
+    </div>
+
+    {{ form.submit(class="btn btn-primary") }}
+</form>
+<p class="mt-3">没有账号？<a href="{{ url_for('register') }}">点击注册</a></p>
+{% endblock %}

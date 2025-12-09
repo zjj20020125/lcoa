@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+
+{% block title %}首页 - Flask Auth{% endblock %}
+
+{% block content %}
+<h2>欢迎回来，{{ user.username }}！</h2>
+<p class="mt-3">注册时间：{{ user.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+<a href="{{ url_for('logout') }}" class="btn btn-danger mt-3">注销登录</a>
+{% endblock %}
